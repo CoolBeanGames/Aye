@@ -6,6 +6,7 @@ internal sealed class TrayAppContext : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
     private bool _captureActive;
+    private string? _lastScreenshotPath;
 
     public TrayAppContext()
     {
@@ -16,6 +17,7 @@ internal sealed class TrayAppContext : ApplicationContext
             Renderer = new DarkMenuRenderer()
         };
         menu.Items.Add("Take screenshot", null, (_, _) => BeginCapture());
+        menu.Items.Add("Edit last screenshot", null, (_, _) => EditLastScreenshot());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit Aye", null, (_, _) => ExitThread());
 
@@ -37,6 +39,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _captureActive = true;
         _trayIcon.Visible = false;
         var overlay = new ScreenshotOverlay();
+        overlay.ScreenshotSaved += path => _lastScreenshotPath = path;
         overlay.FormClosed += (_, _) =>
         {
             _captureActive = false;
@@ -44,6 +47,31 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         overlay.Show();
         overlay.Activate();
+    }
+
+    private void EditLastScreenshot()
+    {
+        var path = FindLastScreenshot();
+        if (path is null)
+        {
+            _trayIcon.ShowBalloonTip(2500, "Aye", "Take a screenshot first, then edit it here.", ToolTipIcon.Info);
+            return;
+        }
+
+        using var editor = new EditorForm(path);
+        editor.ShowDialog();
+        if (editor.SavedPath is not null)
+            _lastScreenshotPath = editor.SavedPath;
+    }
+
+    private string? FindLastScreenshot()
+    {
+        if (_lastScreenshotPath is not null && File.Exists(_lastScreenshotPath))
+            return _lastScreenshotPath;
+        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Screenshots");
+        return Directory.Exists(directory)
+            ? Directory.EnumerateFiles(directory, "*.png").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault()
+            : null;
     }
 
     protected override void ExitThreadCore()

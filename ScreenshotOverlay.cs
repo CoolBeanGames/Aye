@@ -6,6 +6,8 @@ namespace Aye;
 
 internal sealed class ScreenshotOverlay : Form
 {
+    public event Action<string>? ScreenshotSaved;
+
     private readonly Bitmap _screen;
     private readonly Bitmap _blurred;
     private Point _start;
@@ -92,6 +94,7 @@ internal sealed class ScreenshotOverlay : Form
             Thread.Sleep(100);
             Clipboard.SetImage(capture);
         }
+        ScreenshotSaved?.Invoke(path);
         Close();
     }
 
