@@ -5,15 +5,22 @@ namespace Aye;
 internal sealed class TrayAppContext : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
-    private readonly PrintScreenHook _printScreenHook;
+    private readonly AppSettings _settings;
+    private readonly ToolStripMenuItem _defaultToolItem;
+    private PrintScreenHook? _printScreenHook;
     private bool _captureActive;
     private string? _lastScreenshotPath;
 
     public TrayAppContext()
     {
+        _settings = AppSettings.Load();
+
         var menu = DarkMenu.Create();
         menu.Items.Add(DarkMenu.Item("Take screenshot", (_, _) => BeginCapture()));
         menu.Items.Add(DarkMenu.Item("Edit last screenshot", (_, _) => EditLastScreenshot()));
+        menu.Items.Add(new ToolStripSeparator());
+        _defaultToolItem = DarkMenu.Item("", (_, _) => ToggleDefaultTool());
+        menu.Items.Add(_defaultToolItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(DarkMenu.Item("Exit Aye", (_, _) => ExitThread()));
 
@@ -26,10 +33,44 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         _trayIcon.DoubleClick += (_, _) => BeginCapture();
 
-        StartupRegistration.EnsureConfigured();
-        _printScreenHook = new PrintScreenHook(BeginCapture);
-        if (!_printScreenHook.IsInstalled)
-            _trayIcon.ShowBalloonTip(3500, "Aye", "Print Screen could not be registered. Restart Aye to try again.", ToolTipIcon.Warning);
+        if (!_settings.FirstRunPromptShown)
+        {
+            _settings.FirstRunPromptShown = true;
+            _settings.DefaultScreenshotTool = DefaultToolPrompt.Ask();
+            _settings.Save();
+        }
+
+        ApplyDefaultToolState();
+    }
+
+    private void ToggleDefaultTool()
+    {
+        _settings.DefaultScreenshotTool = !_settings.DefaultScreenshotTool;
+        _settings.Save();
+        ApplyDefaultToolState();
+    }
+
+    private void ApplyDefaultToolState()
+    {
+        var enabled = _settings.DefaultScreenshotTool;
+        _defaultToolItem.Text = enabled ? "Default screenshot tool: on" : "Default screenshot tool: off";
+
+        StartupRegistration.SetEnabled(enabled);
+
+        if (enabled)
+        {
+            if (_printScreenHook is null)
+            {
+                _printScreenHook = new PrintScreenHook(BeginCapture);
+                if (!_printScreenHook.IsInstalled)
+                    _trayIcon.ShowBalloonTip(3500, "Aye", "Print Screen could not be registered. Restart Aye to try again.", ToolTipIcon.Warning);
+            }
+        }
+        else
+        {
+            _printScreenHook?.Dispose();
+            _printScreenHook = null;
+        }
     }
 
     private void BeginCapture()
@@ -78,7 +119,7 @@ internal sealed class TrayAppContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         _trayIcon.Visible = false;
-        _printScreenHook.Dispose();
+        _printScreenHook?.Dispose();
         _trayIcon.Dispose();
         base.ExitThreadCore();
     }

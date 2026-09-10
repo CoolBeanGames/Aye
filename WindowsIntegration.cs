@@ -9,21 +9,31 @@ internal static class StartupRegistration
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string KeyboardKey = @"Control Panel\Keyboard";
+    private const string RunValue = "Aye";
 
-    public static void EnsureConfigured()
+    /// <summary>
+    /// Registers or removes the sign-in launch entry and the Snipping Tool Print Screen
+    /// override for the current user, matching <paramref name="enabled"/>.
+    /// </summary>
+    public static void SetEnabled(bool enabled)
     {
         try
         {
-            var executable = Environment.ProcessPath;
-            if (!string.IsNullOrWhiteSpace(executable))
+            using var run = Registry.CurrentUser.CreateSubKey(RunKey);
+            if (enabled)
             {
-                using var run = Registry.CurrentUser.CreateSubKey(RunKey);
-                run?.SetValue("Aye", $"\"{executable}\"", RegistryValueKind.String);
+                var executable = Environment.ProcessPath;
+                if (!string.IsNullOrWhiteSpace(executable))
+                    run?.SetValue(RunValue, $"\"{executable}\"", RegistryValueKind.String);
+            }
+            else if (run?.GetValue(RunValue) is not null)
+            {
+                run.DeleteValue(RunValue, throwOnMissingValue: false);
             }
 
             // Windows 10/11 otherwise reserves Print Screen for Snipping Tool.
             using var keyboard = Registry.CurrentUser.CreateSubKey(KeyboardKey);
-            keyboard?.SetValue("PrintScreenKeyForSnippingEnabled", 0, RegistryValueKind.DWord);
+            keyboard?.SetValue("PrintScreenKeyForSnippingEnabled", enabled ? 0 : 1, RegistryValueKind.DWord);
         }
         catch (UnauthorizedAccessException) { }
         catch (SecurityException) { }
