@@ -5,6 +5,7 @@ namespace Aye;
 internal sealed class TrayAppContext : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
+    private readonly PrintScreenHook _printScreenHook;
     private bool _captureActive;
     private string? _lastScreenshotPath;
 
@@ -29,6 +30,11 @@ internal sealed class TrayAppContext : ApplicationContext
             Visible = true
         };
         _trayIcon.DoubleClick += (_, _) => BeginCapture();
+
+        StartupRegistration.EnsureConfigured();
+        _printScreenHook = new PrintScreenHook(BeginCapture);
+        if (!_printScreenHook.IsInstalled)
+            _trayIcon.ShowBalloonTip(3500, "Aye", "Print Screen could not be registered. Restart Aye to try again.", ToolTipIcon.Warning);
     }
 
     private void BeginCapture()
@@ -77,6 +83,7 @@ internal sealed class TrayAppContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         _trayIcon.Visible = false;
+        _printScreenHook.Dispose();
         _trayIcon.Dispose();
         base.ExitThreadCore();
     }
