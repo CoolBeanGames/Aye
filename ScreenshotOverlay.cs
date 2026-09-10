@@ -1,6 +1,5 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 
 namespace Aye;
 
@@ -85,15 +84,7 @@ internal sealed class ScreenshotOverlay : Form
         Directory.CreateDirectory(directory);
         var path = GetUniquePath(directory);
         capture.Save(path, ImageFormat.Png);
-        try
-        {
-            Clipboard.SetImage(capture);
-        }
-        catch (ExternalException)
-        {
-            Thread.Sleep(100);
-            Clipboard.SetImage(capture);
-        }
+        ClipboardImage.Copy(capture);
         ScreenshotSaved?.Invoke(path);
         Close();
     }

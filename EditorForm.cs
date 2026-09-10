@@ -7,18 +7,23 @@ namespace Aye;
 
 internal sealed class EditorForm : Form
 {
-    private const int RailWidth = 224;
+    private const int RailWidth = 244;
+    private const int RailControlWidth = RailWidth - 44;
+
+    private static readonly int[] StrokeSizes = { 2, 4, 8, 16, 24 };
 
     private readonly string _sourcePath;
     private readonly EditCanvas _canvas;
-    private readonly FlowLayoutPanel _tools;
-    private readonly NumericUpDown _penSize;
-    private readonly Button _colorButton;
-    private readonly ComboBox _aspect;
-    private readonly ComboBox _scale;
+    private readonly FlowLayoutPanel _tools = new();
+    private readonly List<FlatButton> _toolButtons = new();
+    private readonly List<FlatButton> _strokeButtons = new();
+    private FlatButton _colorButton = null!;
+    private readonly FlatButton _aspectButton;
+    private readonly FlatButton _scaleButton;
     private TextBox? _textEditor;
     private TextItem? _editingText;
     private Color _activeColor = Theme.Accent;
+    private float? _cropAspect;
 
     public string? SavedPath { get; private set; }
 
@@ -28,7 +33,7 @@ internal sealed class EditorForm : Form
         Text = $"Aye — {Path.GetFileName(sourcePath)}";
         BackColor = Theme.Workspace;
         ForeColor = Theme.Text;
-        Font = new Font("Segoe UI Variable", 10);
+        Font = Ui.Regular(10f);
         MinimumSize = new Size(960, 640);
         WindowState = FormWindowState.Maximized;
         StartPosition = FormStartPosition.CenterScreen;
@@ -47,77 +52,73 @@ internal sealed class EditorForm : Form
         stage.Controls.Add(_canvas);
 
         // Left rail: stacked, sectioned tool groups in the Zen column style.
-        _tools = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            AutoScroll = true,
-            Dock = DockStyle.Fill,
-            BackColor = Theme.PanelDeep,
-            Padding = new Padding(16, 14, 16, 14)
-        };
+        _tools.FlowDirection = FlowDirection.TopDown;
+        _tools.WrapContents = false;
+        _tools.AutoScroll = true;
+        _tools.Dock = DockStyle.Fill;
+        _tools.BackColor = Theme.PanelDeep;
+        _tools.Padding = new Padding(18, 16, 14, 16);
 
-        _tools.Controls.Add(MakeSectionLabel("TOOLS", first: true));
-        AddToolButton("PEN", EditTool.Pen);
-        AddToolButton("BOX", EditTool.Rectangle);
-        AddToolButton("CIRCLE", EditTool.Ellipse);
-        AddToolButton("TEXT", EditTool.Text);
-        AddToolButton("CROP", EditTool.Crop);
-        AddToolButton("FOCUS", EditTool.Focus);
+        AddSection("Tools", first: true);
+        AddToolButton("Pen", EditTool.Pen);
+        AddToolButton("Box", EditTool.Rectangle);
+        AddToolButton("Circle", EditTool.Ellipse);
+        AddToolButton("Text", EditTool.Text);
+        AddToolButton("Crop", EditTool.Crop);
+        AddToolButton("Focus", EditTool.Focus);
 
-        _tools.Controls.Add(MakeSectionLabel("STROKE"));
-        _colorButton = MakeRailButton("COLOR");
-        _colorButton.BackColor = _activeColor;
-        _colorButton.ForeColor = Color.White;
+        AddSection("Colour");
+        _colorButton = MakeRailButton("Choose colour…");
+        _colorButton.BorderColor = _activeColor;
         _colorButton.Click += (_, _) => ChooseColor();
         _tools.Controls.Add(_colorButton);
 
-        _penSize = new NumericUpDown
+        AddSection("Stroke width");
+        var strokeRow = new FlowLayoutPanel
         {
-            Minimum = 1,
-            Maximum = 48,
-            Value = 4,
-            Width = RailControlWidth,
-            BackColor = Theme.Panel,
-            ForeColor = Theme.Text,
-            BorderStyle = BorderStyle.FixedSingle,
-            TextAlign = HorizontalAlignment.Center,
-            Margin = new Padding(0, 0, 0, 6)
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 4),
+            Width = RailControlWidth
         };
-        _penSize.ValueChanged += (_, _) => _canvas.StrokeWidth = (float)_penSize.Value;
-        _tools.Controls.Add(_penSize);
-
-        _tools.Controls.Add(MakeSectionLabel("CROP"));
-        _aspect = MakeCombo(new[] { "FREE CROP", "1:1", "4:3", "16:9" });
-        _aspect.SelectedIndexChanged += (_, _) => _canvas.CropAspect = _aspect.SelectedIndex switch
+        foreach (var size in StrokeSizes)
         {
-            1 => 1f,
-            2 => 4f / 3f,
-            3 => 16f / 9f,
-            _ => null
-        };
-        _tools.Controls.Add(_aspect);
-
-        _tools.Controls.Add(MakeSectionLabel("SCALE"));
-        _scale = MakeCombo(new[] { "SCALE 100%", "SCALE 75%", "SCALE 50%", "SCALE 25%" });
-        _scale.SelectedIndexChanged += (_, _) =>
-        {
-            var factor = new[] { 1f, .75f, .5f, .25f }[_scale.SelectedIndex];
-            if (factor < 1f)
+            var button = new FlatButton
             {
-                _canvas.ScaleImage(factor);
-                _scale.SelectedIndex = 0;
-            }
-        };
-        _tools.Controls.Add(_scale);
+                Text = size.ToString(),
+                Size = new Size(34, 30),
+                Margin = new Padding(0, 0, 6, 0),
+                Tag = size
+            };
+            button.Click += (_, _) => SetStroke(size);
+            _strokeButtons.Add(button);
+            strokeRow.Controls.Add(button);
+        }
+        _tools.Controls.Add(strokeRow);
 
-        var rail = new Panel
+        AddSection("Crop ratio");
+        _aspectButton = MakeRailButton("Free crop  ▾");
+        _aspectButton.Click += (_, _) => ShowMenu(_aspectButton, new (string, Action)[]
         {
-            Dock = DockStyle.Left,
-            Width = RailWidth,
-            BackColor = Theme.PanelDeep,
-            Padding = new Padding(0, 0, 1, 0)
-        };
+            ("Free crop", () => ApplyAspect(null, "Free crop")),
+            ("Square 1:1", () => ApplyAspect(1f, "Square 1:1")),
+            ("Standard 4:3", () => ApplyAspect(4f / 3f, "Standard 4:3")),
+            ("Widescreen 16:9", () => ApplyAspect(16f / 9f, "Widescreen 16:9")),
+        });
+        _tools.Controls.Add(_aspectButton);
+
+        AddSection("Scale image");
+        _scaleButton = MakeRailButton("Resize…  ▾");
+        _scaleButton.Click += (_, _) => ShowMenu(_scaleButton, new (string, Action)[]
+        {
+            ("75% of current size", () => _canvas.ScaleImage(.75f)),
+            ("50% of current size", () => _canvas.ScaleImage(.5f)),
+            ("25% of current size", () => _canvas.ScaleImage(.25f)),
+        });
+        _tools.Controls.Add(_scaleButton);
+
+        var rail = new Panel { Dock = DockStyle.Left, Width = RailWidth, BackColor = Theme.PanelDeep };
         var railDivider = new Panel { Dock = DockStyle.Right, Width = 1, BackColor = Theme.Border };
         rail.Controls.Add(_tools);
         rail.Controls.Add(railDivider);
@@ -126,23 +127,24 @@ internal sealed class EditorForm : Form
         var footer = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = 68,
-            Padding = new Padding(16, 15, 16, 15),
+            Height = 66,
+            Padding = new Padding(18, 14, 18, 14),
             BackColor = Theme.PanelDeep,
             FlowDirection = FlowDirection.RightToLeft,
             WrapContents = false
         };
         var footerDivider = new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = Theme.Border };
-        var overwrite = MakeRailButton("OVERWRITE", width: 132);
-        overwrite.BackColor = Theme.Accent;
-        overwrite.ForeColor = Color.White;
-        overwrite.TextAlign = ContentAlignment.MiddleCenter;
+        var overwrite = new FlatButton
+        {
+            Text = "Overwrite",
+            Accent = true,
+            Size = new Size(120, 38),
+            Margin = new Padding(8, 0, 0, 0)
+        };
         overwrite.Click += (_, _) => Save(overwrite: true);
-        var saveCopy = MakeRailButton("SAVE A COPY", width: 128);
-        saveCopy.TextAlign = ContentAlignment.MiddleCenter;
+        var saveCopy = new FlatButton { Text = "Save a copy", Size = new Size(120, 38), Margin = new Padding(8, 0, 0, 0) };
         saveCopy.Click += (_, _) => Save(overwrite: false);
-        var cancel = MakeRailButton("CANCEL", width: 100);
-        cancel.TextAlign = ContentAlignment.MiddleCenter;
+        var cancel = new FlatButton { Text = "Cancel", Size = new Size(96, 38), Margin = new Padding(0) };
         cancel.Click += (_, _) => Close();
         footer.Controls.Add(overwrite);
         footer.Controls.Add(saveCopy);
@@ -156,63 +158,65 @@ internal sealed class EditorForm : Form
         KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); };
 
         _canvas.ActiveColor = _activeColor;
-        _canvas.StrokeWidth = (float)_penSize.Value;
+        SetStroke(4);
         SetTool(EditTool.Pen);
     }
 
-    private const int RailControlWidth = RailWidth - 33;
+    private void AddSection(string text, bool first = false) => _tools.Controls.Add(new Label
+    {
+        Text = text.ToUpperInvariant(),
+        AutoSize = true,
+        ForeColor = Theme.TextMuted,
+        Font = Ui.Semibold(8f),
+        Margin = new Padding(2, first ? 2 : 18, 0, 8)
+    });
 
     private void AddToolButton(string label, EditTool tool)
     {
         var button = MakeRailButton(label);
         button.Tag = tool;
         button.Click += (_, _) => SetTool(tool);
+        _toolButtons.Add(button);
         _tools.Controls.Add(button);
     }
+
+    private FlatButton MakeRailButton(string text) => new()
+    {
+        Text = text,
+        Size = new Size(RailControlWidth, 34),
+        Margin = new Padding(0, 0, 0, 6)
+    };
 
     private void SetTool(EditTool tool)
     {
         CommitTextEdit();
         _canvas.Tool = tool;
-        foreach (Control control in _tools.Controls)
-        {
-            if (control is Button button && button.Tag is EditTool value)
-            {
-                var active = value == tool;
-                button.BackColor = active ? Theme.AccentDim : Theme.Panel;
-                button.FlatAppearance.BorderColor = active ? Theme.Accent : Theme.Border;
-            }
-        }
+        _canvas.CropAspect = tool == EditTool.Crop ? _cropAspect : null;
+        foreach (var button in _toolButtons)
+            button.Active = button.Tag is EditTool value && value == tool;
     }
 
-    private static Label MakeSectionLabel(string text, bool first = false) => new()
+    private void SetStroke(int size)
     {
-        Text = text,
-        AutoSize = true,
-        ForeColor = Theme.TextMuted,
-        Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-        Margin = new Padding(2, first ? 0 : 16, 0, 8)
-    };
+        _canvas.StrokeWidth = size;
+        foreach (var button in _strokeButtons)
+            button.Active = button.Tag is int value && value == size;
+    }
 
-    private static Button MakeRailButton(string text, int width = RailControlWidth)
+    private void ApplyAspect(float? aspect, string label)
     {
-        var button = new Button
-        {
-            Text = text,
-            AutoSize = false,
-            Size = new Size(width, 34),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Panel,
-            ForeColor = Theme.Text,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(12, 0, 8, 0),
-            Margin = new Padding(0, 0, 0, 6),
-            Cursor = Cursors.Hand,
-            UseVisualStyleBackColor = false
-        };
-        button.FlatAppearance.BorderColor = Theme.Border;
-        button.FlatAppearance.BorderSize = 1;
-        return button;
+        _cropAspect = aspect;
+        _aspectButton.Text = label + "  ▾";
+        if (_canvas.Tool == EditTool.Crop)
+            _canvas.CropAspect = aspect;
+    }
+
+    private static void ShowMenu(Control anchor, (string Label, Action OnPick)[] options)
+    {
+        var menu = DarkMenu.Create();
+        foreach (var (label, onPick) in options)
+            menu.Items.Add(DarkMenu.Item(label, (_, _) => onPick()));
+        menu.Show(anchor, new Point(0, anchor.Height + 2));
     }
 
     private void ChooseColor()
@@ -222,7 +226,8 @@ internal sealed class EditorForm : Form
             return;
         _activeColor = dialog.Color;
         _canvas.ActiveColor = dialog.Color;
-        _colorButton.BackColor = dialog.Color;
+        _colorButton.BorderColor = dialog.Color;
+        _colorButton.Invalidate();
     }
 
     private void BeginTextEdit(TextItem item, Point screenLocation)
@@ -285,26 +290,10 @@ internal sealed class EditorForm : Form
         {
             result.Save(path, ImageFormat.Png);
         }
-        try { Clipboard.SetImage(result); } catch (ExternalException) { }
+        ClipboardImage.Copy(result);
         SavedPath = path;
         DialogResult = DialogResult.OK;
         Close();
-    }
-
-    private static ComboBox MakeCombo(string[] items)
-    {
-        var combo = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            BackColor = Theme.Panel,
-            ForeColor = Theme.Text,
-            FlatStyle = FlatStyle.Flat,
-            Width = RailControlWidth,
-            Margin = new Padding(0, 0, 0, 6)
-        };
-        combo.Items.AddRange(items);
-        combo.SelectedIndex = 0;
-        return combo;
     }
 
     private static string GetCopyPath(string source)
@@ -325,7 +314,7 @@ internal sealed class TextItem
     public string Text { get; set; } = string.Empty;
     public Point Location { get; set; }
     public Color Color { get; init; }
-    public Font Font { get; set; } = new("Segoe UI Variable", 18);
+    public Font Font { get; set; } = new("Segoe UI", 18);
     public Size Bounds { get; set; } = new(180, 34);
 }
 

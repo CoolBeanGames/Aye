@@ -11,16 +11,11 @@ internal sealed class TrayAppContext : ApplicationContext
 
     public TrayAppContext()
     {
-        var menu = new ContextMenuStrip
-        {
-            BackColor = Theme.Panel,
-            ForeColor = Theme.Text,
-            Renderer = new DarkMenuRenderer()
-        };
-        menu.Items.Add("Take screenshot", null, (_, _) => BeginCapture());
-        menu.Items.Add("Edit last screenshot", null, (_, _) => EditLastScreenshot());
+        var menu = DarkMenu.Create();
+        menu.Items.Add(DarkMenu.Item("Take screenshot", (_, _) => BeginCapture()));
+        menu.Items.Add(DarkMenu.Item("Edit last screenshot", (_, _) => EditLastScreenshot()));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit Aye", null, (_, _) => ExitThread());
+        menu.Items.Add(DarkMenu.Item("Exit Aye", (_, _) => ExitThread()));
 
         _trayIcon = new NotifyIcon
         {
@@ -100,28 +95,5 @@ internal sealed class TrayAppContext : ApplicationContext
         graphics.FillEllipse(pupilBrush, 10, 8, 12, 16);
         graphics.FillEllipse(Brushes.White, 13, 11, 4, 4);
         return Icon.FromHandle(bitmap.GetHicon());
-    }
-
-    private sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
-    {
-        public DarkMenuRenderer() : base(new DarkColors()) { }
-
-        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
-        {
-            using var pen = new Pen(Theme.Border);
-            e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
-        }
-    }
-
-    private sealed class DarkColors : ProfessionalColorTable
-    {
-        public override Color MenuItemSelected => Color.FromArgb(0x1D, 0x22, 0x2C);
-        public override Color MenuItemBorder => Theme.Accent;
-        public override Color ToolStripDropDownBackground => Theme.Panel;
-        public override Color ImageMarginGradientBegin => Theme.Panel;
-        public override Color ImageMarginGradientMiddle => Theme.Panel;
-        public override Color ImageMarginGradientEnd => Theme.Panel;
-        public override Color SeparatorDark => Theme.Border;
-        public override Color SeparatorLight => Theme.Border;
     }
 }
